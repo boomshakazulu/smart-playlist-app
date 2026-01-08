@@ -1,0 +1,29 @@
+{
+  "name": "smart-playlist-app",
+  "version": "1.0.0",
+  "description": "enhances spotify playlists with smooth transitions",
+  "homepage": "https://github.com/boomshakazulu/smart-playlist-app#readme",
+  "bugs": {
+    "url": "https://github.com/boomshakazulu/smart-playlist-app/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/boomshakazulu/smart-playlist-app.git"
+  },
+  "license": "MIT",
+  "author": "boomshakazulu",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "test",
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "dotenv": "^17.2.3",
+    "eslint": "^9.39.2",
+    "prettier": "^3.7.4"
+  }
+}
