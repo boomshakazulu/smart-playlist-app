@@ -7,6 +7,10 @@ import {
   saveTokens,
 } from "../utils/spotifyAuth.js";
 import { fetchPlaylistPreviewMap } from "../utils/spotifyPreview.js";
+import {
+  loadTrackSettings,
+  saveTrackSettings,
+} from "../utils/transitionStorage.js";
 
 function DashboardPage() {
   const [accessToken, setAccessToken] = useState("");
@@ -14,9 +18,15 @@ function DashboardPage() {
   const [expiresAt, setExpiresAt] = useState(0);
   const [profile, setProfile] = useState(null);
   const [playlists, setPlaylists] = useState([]);
+  const [playlistPage, setPlaylistPage] = useState(0);
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [tracks, setTracks] = useState([]);
+  const [trackPage, setTrackPage] = useState(0);
+  const [trackTotal, setTrackTotal] = useState(0);
+  const [trackLoading, setTrackLoading] = useState(false);
   const [previewMap, setPreviewMap] = useState({});
+  const [showTrackSettings, setShowTrackSettings] = useState(false);
+  const [trackSettings, setTrackSettings] = useState(() => loadTrackSettings());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [nowPlayingUrl, setNowPlayingUrl] = useState("");
@@ -33,8 +43,11 @@ function DashboardPage() {
   const transitionRequestIdRef = useRef(0);
   const tracksRef = useRef([]);
   const previewMapRef = useRef({});
+  const trackSettingsRef = useRef(trackSettings);
   const crossfadeTimerRef = useRef(null);
   const nextCrossfadeTimerRef = useRef(null);
+  const crossfadeIntervalRef = useRef(null);
+  const crossfadeCheckRef = useRef(null);
   const preloadAudioRef = useRef(null);
   const navigate = useNavigate();
 
@@ -45,6 +58,10 @@ function DashboardPage() {
   useEffect(() => {
     previewMapRef.current = previewMap;
   }, [previewMap]);
+
+  useEffect(() => {
+    trackSettingsRef.current = trackSettings;
+  }, [trackSettings]);
 
   useEffect(() => {
     audioRef.current = new Audio();
@@ -86,6 +103,7 @@ function DashboardPage() {
     }
 
     setPreviewMap({});
+    setTrackPage(0);
     fetchPlaylistPreviewMap(selectedPlaylist.id, API_BASE)
       .then((map) => setPreviewMap(map))
       .catch((err) => console.error(err));
@@ -105,8 +123,19 @@ function DashboardPage() {
       clearTimeout(nextCrossfadeTimerRef.current);
       nextCrossfadeTimerRef.current = null;
     }
+    if (crossfadeIntervalRef.current) {
+      clearInterval(crossfadeIntervalRef.current);
+      crossfadeIntervalRef.current = null;
+    }
 
     if (audioRef.current) {
+      if (crossfadeCheckRef.current) {
+        audioRef.current.removeEventListener(
+          "timeupdate",
+          crossfadeCheckRef.current
+        );
+        crossfadeCheckRef.current = null;
+      }
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       audioRef.current.onended = null;
@@ -227,6 +256,8 @@ function DashboardPage() {
     stopAllAudio();
     setSelectedPlaylist(playlist);
     setTracks([]);
+    setTrackPage(0);
+    setTrackTotal(playlist?.tracks?.total || 0);
     setPreviewMap({});
     setLoading(true);
     setError("");
@@ -239,7 +270,7 @@ function DashboardPage() {
       }
 
       const response = await fetch(
-        `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=50`,
+        `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?limit=50&offset=0`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) {
@@ -247,6 +278,7 @@ function DashboardPage() {
       }
       const data = await response.json();
       setTracks(data.items || []);
+      setTrackTotal(typeof data.total === "number" ? data.total : 0);
     } catch (err) {
       setError("We could not load that playlist's tracks.");
     } finally {
@@ -254,11 +286,98 @@ function DashboardPage() {
     }
   };
 
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(playlists.length / pageSize));
+  const playlistPageSafe = Math.min(
+    Math.max(0, playlistPage),
+    totalPages - 1
+  );
+  const visiblePlaylists = playlists.slice(
+    playlistPageSafe * pageSize,
+    playlistPageSafe * pageSize + pageSize
+  );
+
+  const goToPlaylistPage = (nextPage) => {
+    const clamped = Math.min(Math.max(0, nextPage), totalPages - 1);
+    setPlaylistPage(clamped);
+  };
+
+  const trackPageSize = 50;
+  const trackTotalPages = Math.max(
+    1,
+    Math.ceil(trackTotal / trackPageSize)
+  );
+  const trackPageSafe = Math.min(
+    Math.max(0, trackPage),
+    trackTotalPages - 1
+  );
+  const visibleTracks = tracks.slice(
+    trackPageSafe * trackPageSize,
+    trackPageSafe * trackPageSize + trackPageSize
+  );
+
+  const goToTrackPage = async (nextPage) => {
+    const clamped = Math.min(Math.max(0, nextPage), trackTotalPages - 1);
+    const needed = (clamped + 1) * trackPageSize;
+    if (selectedPlaylist?.id && tracks.length < needed && tracks.length < trackTotal) {
+      setTrackLoading(true);
+      try {
+        const token = await ensureAccessToken();
+        if (!token) {
+          setTrackLoading(false);
+          return;
+        }
+        const response = await fetch(
+          `https://api.spotify.com/v1/playlists/${selectedPlaylist.id}/tracks?limit=50&offset=${tracks.length}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) {
+          throw new Error("Failed to load playlist tracks");
+        }
+        const data = await response.json();
+        setTracks((prev) => [...prev, ...(data.items || [])]);
+        if (typeof data.total === "number") {
+          setTrackTotal(data.total);
+        }
+      } catch (err) {
+        setError("We could not load more tracks.");
+      } finally {
+        setTrackLoading(false);
+      }
+    }
+    setTrackPage(clamped);
+  };
+
   const getPreviewUrl = (track) => {
     if (!track?.id) {
       return "";
     }
     return track.preview_url || previewMapRef.current[track.id] || "";
+  };
+
+  const getTrackSetting = (trackId) =>
+    trackSettingsRef.current[trackId] || { bpmOffset: 0, energyOffset: 0 };
+
+  const clampNumber = (value, min, max) =>
+    Math.min(max, Math.max(min, value));
+
+  const updateTrackSetting = (trackId, field, rawValue) => {
+    const numericValue = Number(rawValue);
+    const nextValue = Number.isFinite(numericValue) ? numericValue : 0;
+    const clamped =
+      field === "bpmOffset"
+        ? clampNumber(nextValue, -20, 20)
+        : clampNumber(nextValue, -0.5, 0.5);
+    const nextSettings = {
+      ...trackSettingsRef.current,
+      [trackId]: {
+        ...getTrackSetting(trackId),
+        [field]: clamped,
+      },
+    };
+    trackSettingsRef.current = nextSettings;
+    setTrackSettings(nextSettings);
+    saveTrackSettings(nextSettings);
   };
 
   const findNextPlayableIndex = (startIndex) => {
@@ -352,17 +471,11 @@ function DashboardPage() {
 
     const crossfadeMs = 2200;
     const crossfadeLeadMs = 4000;
-    const remainingMs = Math.max(
-      0,
-      Math.floor((duration - previewAudio.currentTime) * 1000)
-    );
-    const delayMs = Math.max(0, remainingMs - crossfadeLeadMs);
 
-    if (crossfadeTimerRef.current) {
-      clearTimeout(crossfadeTimerRef.current);
-    }
-
-    crossfadeTimerRef.current = setTimeout(() => {
+    const beginCrossfade = () => {
+      if (transitionMetaRef.current.crossfading) {
+        return;
+      }
       console.log("crossfade_start", transitionUrl);
       transitionAudio.pause();
       transitionAudio.currentTime = 0;
@@ -387,23 +500,58 @@ function DashboardPage() {
 
       updateTransitionMeta({ crossfading: true });
 
-      const start = performance.now();
-      const step = () => {
-        const t = Math.min(1, (performance.now() - start) / crossfadeMs);
+      if (crossfadeIntervalRef.current) {
+        clearInterval(crossfadeIntervalRef.current);
+      }
+      const start = Date.now();
+      crossfadeIntervalRef.current = setInterval(() => {
+        const t = Math.min(1, (Date.now() - start) / crossfadeMs);
         previewAudio.volume = 1 - t;
         transitionAudio.volume = t;
 
-        if (t < 1) {
-          requestAnimationFrame(step);
-        } else {
+        if (t >= 1) {
+          clearInterval(crossfadeIntervalRef.current);
+          crossfadeIntervalRef.current = null;
           previewAudio.pause();
           previewAudio.currentTime = 0;
           previewAudio.volume = 1;
           updateTransitionMeta({ crossfading: false });
         }
-      };
-      requestAnimationFrame(step);
-    }, delayMs);
+      }, 50);
+    };
+
+    if (crossfadeTimerRef.current) {
+      clearTimeout(crossfadeTimerRef.current);
+    }
+    const remainingMs = Math.max(
+      0,
+      Math.floor((duration - previewAudio.currentTime) * 1000)
+    );
+    const delayMs = Math.max(0, remainingMs - crossfadeLeadMs);
+    crossfadeTimerRef.current = setTimeout(beginCrossfade, delayMs);
+
+    if (crossfadeCheckRef.current) {
+      previewAudio.removeEventListener("timeupdate", crossfadeCheckRef.current);
+    }
+    const check = () => {
+      if (transitionMetaRef.current.crossfading) {
+        return;
+      }
+      const remaining = duration - previewAudio.currentTime;
+      if (remaining <= crossfadeLeadMs / 1000) {
+        if (crossfadeCheckRef.current) {
+          previewAudio.removeEventListener(
+            "timeupdate",
+            crossfadeCheckRef.current
+          );
+          crossfadeCheckRef.current = null;
+        }
+        beginCrossfade();
+      }
+    };
+    crossfadeCheckRef.current = check;
+    previewAudio.addEventListener("timeupdate", check);
+    check();
 
     return true;
   };
@@ -466,16 +614,25 @@ function DashboardPage() {
         throw new Error("Missing preview audio for analysis");
       }
 
+      const aSettings = getTrackSetting(currentTrack.id);
+      const bSettings = getTrackSetting(nextTrack.id);
+      const user = {
+        bpmOffset: (aSettings.bpmOffset + bSettings.bpmOffset) / 2,
+        energyOffset: (aSettings.energyOffset + bSettings.energyOffset) / 2,
+      };
+      const body = {
+        aUrl: currentPreviewUrl,
+        bUrl: nextPreviewUrl,
+        seconds: 12,
+        user,
+      };
+
       const response = await fetch(
         `${API_BASE}/api/transitions/generate-from-previews`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            aUrl: currentPreviewUrl,
-            bUrl: nextPreviewUrl,
-            seconds: 12,
-          }),
+          body: JSON.stringify(body),
         }
       );
 
@@ -647,9 +804,28 @@ function DashboardPage() {
           <div className="panel-header">
             <h2>Your playlists</h2>
             <p>{playlists.length} available</p>
+            <div className="panel-actions">
+              <button
+                className="button ghost small"
+                onClick={() => goToPlaylistPage(playlistPageSafe - 1)}
+                disabled={playlistPageSafe <= 0}
+              >
+                Prev
+              </button>
+              <span className="page-indicator">
+                Page {playlistPageSafe + 1} / {totalPages}
+              </span>
+              <button
+                className="button ghost small"
+                onClick={() => goToPlaylistPage(playlistPageSafe + 1)}
+                disabled={playlistPageSafe >= totalPages - 1}
+              >
+                Next
+              </button>
+            </div>
           </div>
           <div className="playlist-grid">
-            {playlists.map((playlist) => {
+            {visiblePlaylists.map((playlist) => {
               const image = playlist.images?.[0]?.url;
               const active = selectedPlaylist?.id === playlist.id;
               return (
@@ -685,19 +861,47 @@ function DashboardPage() {
                 ? `${tracks.length} loaded`
                 : "Choose a playlist to preview its tracks."}
             </p>
+            <div className="panel-actions">
+              <button
+                className="button ghost small"
+                onClick={() => setShowTrackSettings((prev) => !prev)}
+                disabled={!tracks.length}
+              >
+                {showTrackSettings ? "Hide settings" : "Show settings"}
+              </button>
+              <button
+                className="button ghost small"
+                onClick={() => goToTrackPage(trackPageSafe - 1)}
+                disabled={trackPageSafe <= 0 || trackLoading}
+              >
+                Prev
+              </button>
+              <span className="page-indicator">
+                Page {trackPageSafe + 1} / {trackTotalPages}
+              </span>
+              <button
+                className="button ghost small"
+                onClick={() => goToTrackPage(trackPageSafe + 1)}
+                disabled={trackPageSafe >= trackTotalPages - 1 || trackLoading}
+              >
+                Next
+              </button>
+            </div>
           </div>
           <div className="track-list">
             {tracks.length === 0 && !loading ? (
               <div className="empty">No tracks loaded yet.</div>
             ) : null}
-            {tracks.map((item, index) => {
+            {visibleTracks.map((item, index) => {
+              const absoluteIndex = trackPageSafe * trackPageSize + index;
               const track = item.track;
               if (!track) {
                 return null;
               }
               const previewUrl =
                 track.preview_url || previewMap[track.id] || "";
-              const key = track.id || track.uri || `${track.name}-${index}`;
+              const key = track.id || track.uri || `${track.name}-${absoluteIndex}`;
+              const settings = getTrackSetting(track.id);
               return (
                 <div className="track-row" key={key}>
                   <div className="track-info">
@@ -713,10 +917,48 @@ function DashboardPage() {
                     <button
                       className="button small"
                       disabled={!previewUrl}
-                      onClick={() => togglePreview(track, index)}
+                      onClick={() => togglePreview(track, absoluteIndex)}
                     >
                       {nowPlayingUrl === previewUrl ? "Stop" : "Play"}
                     </button>
+                    {showTrackSettings ? (
+                      <div className="track-settings">
+                        <label>
+                          Tempo offset
+                          <input
+                            type="number"
+                            step="1"
+                            min="-20"
+                            max="20"
+                            value={settings.bpmOffset ?? 0}
+                            onChange={(event) =>
+                              updateTrackSetting(
+                                track.id,
+                                "bpmOffset",
+                                event.target.value
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Speed offset
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="-0.5"
+                            max="0.5"
+                            value={settings.energyOffset ?? 0}
+                            onChange={(event) =>
+                              updateTrackSetting(
+                                track.id,
+                                "energyOffset",
+                                event.target.value
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );

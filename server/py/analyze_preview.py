@@ -22,6 +22,10 @@ def summarize_feature(values: np.ndarray) -> Dict[str, float]:
 
 def analyze_audio(path: str, sr: int = 22050) -> Dict[str, Any]:
     y, sr = librosa.load(path, sr=sr, mono=True)
+    if y.size:
+        y_trim, _ = librosa.effects.trim(y, top_db=35)
+        if y_trim.size >= int(sr * 0.5):
+            y = y_trim
     duration = float(librosa.get_duration(y=y, sr=sr))
 
     # Harmonic / percussive split
@@ -38,7 +42,12 @@ def analyze_audio(path: str, sr: int = 22050) -> Dict[str, Any]:
     try:
         tempo_candidates = librosa.beat.tempo(y=y_perc, sr=sr, aggregate=None)
         if tempo_candidates is not None and len(tempo_candidates) > 0:
-            tempo = float(np.median(tempo_candidates))
+            candidates = np.asarray(tempo_candidates, dtype=float)
+            filtered = candidates[(candidates >= 60.0) & (candidates <= 200.0)]
+            if filtered.size:
+                tempo = float(np.median(filtered))
+            else:
+                tempo = float(np.median(candidates))
     except Exception:
         pass
 
@@ -66,6 +75,7 @@ def analyze_audio(path: str, sr: int = 22050) -> Dict[str, Any]:
     flatness = librosa.feature.spectral_flatness(y=y)[0]
     zcr = librosa.feature.zero_crossing_rate(y)[0]
     contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+    onset_strength = librosa.onset.onset_strength(y=y_perc, sr=sr)
 
     centroid_stats = summarize_feature(centroid)
     flatness_stats = summarize_feature(flatness)
@@ -89,6 +99,10 @@ def analyze_audio(path: str, sr: int = 22050) -> Dict[str, Any]:
     major_score = float(np.dot(key_profile, major_profile))
     minor_score = float(np.dot(key_profile, minor_profile))
     mode = "major" if major_score >= minor_score else "minor"
+    key_confidence = float(key_strength)
+    if key_confidence < 0.08:
+        key_name = "unknown"
+        mode = "unknown"
     mfcc_mean = np.mean(mfcc, axis=1).tolist() if mfcc.size else []
     mfcc_std = np.std(mfcc, axis=1).tolist() if mfcc.size else []
 
@@ -103,6 +117,8 @@ def analyze_audio(path: str, sr: int = 22050) -> Dict[str, Any]:
     )
 
     loudness = 20.0 * math.log10(rms_mean + 1e-9)
+    peak = float(np.max(np.abs(y))) if y.size else 0.0
+    crest_factor = float(peak / (rms_mean + 1e-9)) if rms_mean else 0.0
 
     return {
         "tempo": float(tempo),
@@ -121,10 +137,13 @@ def analyze_audio(path: str, sr: int = 22050) -> Dict[str, Any]:
         "key": key_name,
         "mode": mode,
         "key_strength": float(key_strength),
+        "key_confidence": float(key_confidence),
         "tempo_strength": float(tempo_strength),
         "mfcc_mean": [float(x) for x in mfcc_mean],
         "mfcc_std": [float(x) for x in mfcc_std],
         "percussive_ratio": float(perc_ratio),
+        "onset_strength": summarize_feature(onset_strength),
+        "crest_factor": float(crest_factor),
         "sample_rate": int(sr),
     }
 

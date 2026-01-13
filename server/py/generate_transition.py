@@ -49,10 +49,24 @@ def percussive_to_words(p):
         return "balanced groove"
     return "percussive, drum-forward"
 
+def onset_to_words(o):
+    if o < 0.25:
+        return "soft transients"
+    if o < 0.55:
+        return "moderate attack"
+    return "sharp attack"
+
+def dynamics_to_words(c):
+    if c < 3.0:
+        return "compressed dynamics"
+    if c < 6.0:
+        return "balanced dynamics"
+    return "wide dynamics"
+
 def key_to_words(key, mode, strength):
     if not key:
         return "harmonically neutral"
-    if strength < 0.08:
+    if key == "unknown" or mode == "unknown" or strength < 0.08:
         return "tonally ambiguous"
     return f"{key} {mode}"
 
@@ -86,12 +100,10 @@ def build_prompt(a, b, seconds, user=None):
     b_flatness = float(b.get("spectral_flatness", {}).get("mean", 0.2))
     a_perc = float(a.get("percussive_ratio", 0.5))
     b_perc = float(b.get("percussive_ratio", 0.5))
-    a_key = a.get("key", "")
-    b_key = b.get("key", "")
-    a_mode = a.get("mode", "major")
-    b_mode = b.get("mode", "major")
-    a_key_strength = float(a.get("key_strength", 0.0))
-    b_key_strength = float(b.get("key_strength", 0.0))
+    a_onset = float(a.get("onset_strength", {}).get("mean", 0.0))
+    b_onset = float(b.get("onset_strength", {}).get("mean", 0.0))
+    a_crest = float(a.get("crest_factor", 0.0))
+    b_crest = float(b.get("crest_factor", 0.0))
     a_groove = float(a.get("tempo_strength", 1.0))
     b_groove = float(b.get("tempo_strength", 1.0))
 
@@ -114,24 +126,14 @@ def build_prompt(a, b, seconds, user=None):
 
     a_desc = ", ".join([
         energy_to_words(a_energy),
-        valence_to_words(a_valence),
-        loudness_to_words(a_loudness),
-        brightness_to_words(clamp(a_brightness / (a.get("sample_rate", 22050) / 2.0), 0.0, 1.0)),
-        flatness_to_words(a_flatness),
         percussive_to_words(a_perc),
         groove_to_words(a_groove),
-        key_to_words(a_key, a_mode, a_key_strength),
     ])
 
     b_desc = ", ".join([
         energy_to_words(b_energy),
-        valence_to_words(b_valence),
-        loudness_to_words(b_loudness),
-        brightness_to_words(clamp(b_brightness / (b.get("sample_rate", 22050) / 2.0), 0.0, 1.0)),
-        flatness_to_words(b_flatness),
         percussive_to_words(b_perc),
         groove_to_words(b_groove),
-        key_to_words(b_key, b_mode, b_key_strength),
     ])
 
     energy_delta = b_energy - a_energy
@@ -155,20 +157,31 @@ def build_prompt(a, b, seconds, user=None):
     loudness_shift = delta_words(loudness_delta / 10.0, "soften the loudness", "increase loudness")
     perc_shift = delta_words(perc_delta, "less percussive", "more percussive")
 
+    if tempo_delta > 4 or energy_delta > 0.12:
+        transition_style = "buildup transition with rising energy"
+        mid_focus = "use a clean DJ-style filter sweep and a light drum bridge"
+    elif tempo_delta < -4 or energy_delta < -0.12:
+        transition_style = "breakdown transition with easing energy"
+        mid_focus = "use a clean DJ-style filter sweep and a lighter groove"
+    else:
+        transition_style = "smooth DJ-style blend"
+        mid_focus = "use a subtle DJ-style filter sweep with a light drum bridge"
+
     # Keep prompts short + specific. This model responds better to concise cues.
     prompt = (
-        f"{seconds}-second transition that clearly moves from track A to track B. "
+        f"{seconds}-second {transition_style} that clearly moves from track A to track B. "
         f"Start in A only: {a_desc}. "
         f"Then morph to B only: {b_desc}. "
         f"Make the change obvious: {energy_shift}, {mood_shift}, {brightness_shift}, {loudness_shift}, {perc_shift}. "
         f"Tempo must start at {int(round(a_tempo))} BPM and end at {int(round(b_tempo))} BPM, "
         f"with a continuous tempo ramp across the middle. "
         f"First 35% matches A, middle 30% is the shift, last 35% matches B. "
-        f"Keep a tight rhythmic pulse locked to the BPM at each stage, emphasize percussion and groove, "
-        f"avoid organ, slow keyboard pads, or ambient washes, no vocals."
+        f"{mid_focus}. "
+        f"Keep a tight four-on-the-floor pulse locked to the BPM at each stage, emphasize kick, hats, and groove, "
+        f"keep it natural and cohesive, no vocals."
     )
 
-    return prompt, target_bpm, target_energy
+    return prompt, target_bpm, target_energy, target_valence
 
 
 def main():
@@ -204,7 +217,9 @@ def main():
     if seed_value < 0:
         seed_value = random.randint(0, 2_147_483_647)
 
-    prompt, target_bpm, target_energy = build_prompt(a, b, int(args.seconds), user=user)
+    prompt, target_bpm, target_energy, target_valence = build_prompt(
+        a, b, int(args.seconds), user=user
+    )
 
     conditioning = [{
         "prompt": prompt,
@@ -252,6 +267,7 @@ def main():
     print(f"PROMPT={prompt}")
     print(f"TARGET_BPM={target_bpm}")
     print(f"TARGET_ENERGY={target_energy:.3f}")
+    print(f"TARGET_VALENCE={target_valence:.3f}")
     print(f"SEED={seed_value}")
 
 

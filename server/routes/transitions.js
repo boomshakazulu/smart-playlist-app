@@ -245,7 +245,13 @@ router.post("/generate", (req, res) => {
 });
 
 router.post("/generate-from-previews", async (req, res) => {
-  const { aUrl, bUrl, seconds = 12, seed = -1 } = req.body ?? {};
+  const {
+    aUrl,
+    bUrl,
+    seconds = 12,
+    seed = -1,
+    user,
+  } = req.body ?? {};
   if (!aUrl || !bUrl) {
     return res.status(400).json({ error: "preview_urls_required" });
   }
@@ -293,6 +299,7 @@ router.post("/generate-from-previews", async (req, res) => {
         seed,
         outPath,
         half: true,
+        user,
       });
     } catch (error) {
       fs.unlink(aPath, () => {});
