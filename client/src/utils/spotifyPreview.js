@@ -9,7 +9,6 @@ const fetchPlaylistPreviewMap = async (playlistId, apiBase = "") => {
     const data = await response.json();
     return data?.previews || {};
   } catch (error) {
-    console.error("Error fetching playlist preview data:", error);
     return {};
   }
 };

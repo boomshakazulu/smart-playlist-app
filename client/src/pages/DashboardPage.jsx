@@ -106,7 +106,7 @@ function DashboardPage() {
     setTrackPage(0);
     fetchPlaylistPreviewMap(selectedPlaylist.id, API_BASE)
       .then((map) => setPreviewMap(map))
-      .catch((err) => console.error(err));
+      .catch(() => {});
   }, [selectedPlaylist?.id]);
 
   const updateTransitionMeta = (updates) => {
@@ -459,13 +459,11 @@ function DashboardPage() {
     const previewAudio = audioRef.current;
     const transitionAudio = transitionAudioRef.current;
     if (!previewAudio || !transitionAudio || previewAudio.paused) {
-      console.log("crossfade_skip", "no_preview_or_paused");
       return false;
     }
 
     const duration = previewAudio.duration;
     if (!Number.isFinite(duration) || duration <= 0) {
-      console.log("crossfade_skip", "unknown_duration");
       return false;
     }
 
@@ -476,23 +474,13 @@ function DashboardPage() {
       if (transitionMetaRef.current.crossfading) {
         return;
       }
-      console.log("crossfade_start", transitionUrl);
       transitionAudio.pause();
       transitionAudio.currentTime = 0;
       transitionAudio.src = transitionUrl;
       transitionAudio.volume = 0;
-      transitionAudio.onloadedmetadata = () => {
-        console.log(
-          "transition_duration_sec",
-          transitionAudio.duration,
-          transitionUrl
-        );
-      };
-      transitionAudio.play().catch((err) => {
-        console.warn("transition_play_failed", err);
-      });
+      transitionAudio.onloadedmetadata = null;
+      transitionAudio.play().catch(() => {});
       transitionAudio.onended = () => {
-        console.log("transition_end", transitionUrl);
         playNextPreviewFromMeta();
       };
 
@@ -574,14 +562,11 @@ function DashboardPage() {
     }
 
     nextCrossfadeTimerRef.current = setTimeout(() => {
-      console.log("next_preview_overlap_start", nextPreviewUrl);
       nextAudio.pause();
       nextAudio.currentTime = 0;
       nextAudio.src = nextPreviewUrl;
       nextAudio.volume = 0;
-      nextAudio.play().catch((err) => {
-        console.warn("next_preview_play_failed", err);
-      });
+      nextAudio.play().catch(() => {});
 
       const start = performance.now();
       const step = () => {
@@ -661,7 +646,6 @@ function DashboardPage() {
         playTransition();
       }
     } catch (err) {
-      console.error(err);
       updateTransitionMeta({ failed: true });
       if (transitionMetaRef.current.pendingPlayback) {
         updateTransitionMeta({ pendingPlayback: false });

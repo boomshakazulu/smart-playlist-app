@@ -105,7 +105,6 @@ app.get("/callback", async (req, res) => {
     // Redirect user back to frontend with tokens as query params
     res.redirect(`${CLIENT_URL}/auth?${redirectParams}`);
   } catch (error) {
-    console.error(error); // Log the error for debugging
     res.status(400).json({ error: "Failed to authenticate" });
   }
 });
@@ -133,7 +132,6 @@ app.get("/refresh", async (req, res) => {
     const { access_token, expires_in } = response.data;
     res.json({ access_token, expires_in });
   } catch (error) {
-    console.error(error);
     res.status(400).json({ error: "Failed to refresh access token" });
   }
 });
@@ -164,7 +162,6 @@ app.get("/api/audio-features", async (req, res) => {
     );
     res.json(response.data);
   } catch (error) {
-    console.error(error.response?.data || error);
     res.status(500).json({
       error: "audio_features_failed",
       details: error.response?.data || null,
@@ -192,7 +189,6 @@ app.get("/api/audio-features/:id", async (req, res) => {
     );
     res.json(response.data);
   } catch (error) {
-    console.error(error.response?.data || error);
     res.status(500).json({
       error: "audio_feature_failed",
       details: error.response?.data || null,
@@ -241,7 +237,6 @@ app.get("/api/previews/playlist/:playlistId", async (req, res) => {
 
     res.json({ previews });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "preview_fetch_failed" });
   }
 });
@@ -249,4 +244,4 @@ app.get("/api/previews/playlist/:playlistId", async (req, res) => {
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 5174;
-app.listen(port, () => console.log(`API on http://localhost:${port}`));
+app.listen(port);

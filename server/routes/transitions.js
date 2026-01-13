@@ -81,7 +81,6 @@ const startService = () => {
       const trimmed = line.trim();
       if (!trimmed.startsWith("{")) {
         if (trimmed) {
-          console.error("transition_service_stdout", trimmed);
         }
         return;
       }
@@ -100,14 +99,10 @@ const startService = () => {
         pending.reject(new Error(msg.error || "generation_failed"));
       }
     } catch (error) {
-      console.error("transition_service_parse_error", error);
     }
   });
-  serviceProc.stderr.on("data", (d) =>
-    console.error("transition_service_err", d.toString())
-  );
+  serviceProc.stderr.on("data", () => {});
   serviceProc.on("exit", (code) => {
-    console.error("transition_service_exit", code);
     servicePending.forEach((pending) =>
       pending.reject(new Error("transition_service_exit"))
     );
@@ -131,7 +126,6 @@ const enqueueService = (payload) => {
     () =>
       new Promise((resolve, reject) => {
         startService();
-        console.log("transition_service_request", payload.id);
         const timeoutId = setTimeout(() => {
           servicePending.delete(payload.id);
           reject(new Error("transition_service_timeout"));
@@ -263,20 +257,10 @@ router.post("/generate-from-previews", async (req, res) => {
   const bPath = createTempPreviewPath();
 
   try {
-    console.log(
-      "transition_gen_start",
-      JSON.stringify({ seconds, seed, aUrl, bUrl })
-    );
-    console.log("transition_gen_analyze_start");
     const [a, b] = await Promise.all([
       getPreviewFeatures(aUrl, aPath),
       getPreviewFeatures(bUrl, bPath),
     ]);
-    console.log("transition_gen_analyze_end");
-    console.log(
-      "transition_bpm",
-      JSON.stringify({ aTempo: a.tempo, bTempo: b.tempo })
-    );
 
     const id = crypto
       .createHash("sha1")
@@ -290,7 +274,6 @@ router.post("/generate-from-previews", async (req, res) => {
     }
 
     try {
-      console.log("transition_service_enqueue", JSON.stringify({ id }));
       await enqueueService({
         id,
         a,
@@ -304,16 +287,11 @@ router.post("/generate-from-previews", async (req, res) => {
     } catch (error) {
       fs.unlink(aPath, () => {});
       fs.unlink(bPath, () => {});
-      console.error(error);
       return res.status(500).json({ error: "gen_failed" });
     }
 
     fs.unlink(aPath, () => {});
     fs.unlink(bPath, () => {});
-    console.log(
-      "transition_gen_end",
-      JSON.stringify({ id, code: 0, cached: false })
-    );
     if (!fs.existsSync(outPath)) {
       return res
         .status(500)
@@ -323,7 +301,6 @@ router.post("/generate-from-previews", async (req, res) => {
   } catch (error) {
     fs.unlink(aPath, () => {});
     fs.unlink(bPath, () => {});
-    console.error(error);
     res.status(500).json({ error: "preview_transition_failed" });
   }
 });
