@@ -62,7 +62,7 @@ Create a `.env` file in `server/`:
 ```bash
 SPOTIFY_CLIENT_ID=your_client_id
 SPOTIFY_CLIENT_SECRET=your_client_secret
-SPOTIFY_REDIRECT_URI=http://localhost:5173/callback
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:{your-port}/callback
 ```
 
 ### 3) Python environment
